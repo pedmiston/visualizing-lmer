@@ -1,0 +1,99 @@
+1-plotting-regressions
+======================
+author: Pierce Edmiston
+date: 1/21/2015
+```{r setup, echo = FALSE, warning = FALSE}
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(reshape2)
+```
+
+Principles
+==========
+* `lm` parameters as slopes
+* use `predict` to draw the model
+* base plot on observations, layer on predictions
+
+The data
+========
+```{r}
+?sleep
+head(sleep)
+```
+
+Preparing
+=========
+```{r}
+sleep$group_c <- as.numeric(sleep$group) - 1.5
+table(sleep[,c("group", "group_c")])
+```
+
+Base plot on raw data
+=====================
+```{r}
+base_plot <- ggplot(sleep, aes(x = group_c, y = extra)) +
+  geom_point()
+base_plot
+```
+
+Fit the model
+=============
+```{r}
+sleep_from_group <- lm(extra ~ group_c, data = sleep)
+params <- tidy(sleep_from_group)  # library(broom)
+params
+```
+
+Plotting slopes
+===============
+```{r}
+abline_plot <- base_plot + 
+  geom_abline(intercept = 1.54, slope = 1.58)
+abline_plot
+```
+
+Using predict()
+===============
+```{r}
+x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
+y_values <- predict(sleep_from_group, newdata = x_values)
+estimates <- data.frame(x_values, extra = y_values)
+estimates
+```
+
+Using predict()
+===============
+```{r}
+abline_plot + geom_point(data = estimates, shape = 1)
+```
+
+Layer on the predictions
+========================
+```{r, echo = FALSE}
+groups <- data.frame(group_c = unique(sleep$group_c))
+estimates <- predict(sleep_from_group, groups, se.fit = TRUE) %>%
+  cbind(groups, .) %>% select(group_c, extra = fit, se = se.fit)
+
+sleep_plot <- base_plot + 
+  geom_bar(aes(fill = as.factor(group_c)), data = estimates, 
+    stat = "identity", alpha = 0.4) +
+  geom_linerange(aes(ymin = extra - se, ymax = extra + se),
+    data = estimates)
+sleep_plot
+```
+
+Sanity checks
+=============
+```{r}
+sleep_plot + 
+  stat_summary(fun.y = mean, geom = "point", 
+               shape = 2, size = 6)
+```
+
+Sanity checks
+=============
+```{r}
+sleep_plot +
+  geom_line(aes(group = 1), data = estimates)
+```

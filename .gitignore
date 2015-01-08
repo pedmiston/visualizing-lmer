@@ -3,3 +3,4 @@ slides/
 packrat/lib*/
 packrat/src/
 *.md
+*-figure/
