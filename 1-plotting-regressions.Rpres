@@ -2,11 +2,16 @@
 ======================
 author: Pierce Edmiston
 date: 1/21/2015
+css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
 library(ggplot2)
 library(dplyr)
 library(broom)
 library(reshape2)
+library(knitr)
+opts_chunk$set(fig.align = "center",
+               fig.width = 10,
+               fig.height = 10)
 ```
 
 Principles
@@ -18,7 +23,7 @@ Principles
 The data
 ========
 ```{r}
-?sleep
+#?sleep
 head(sleep)
 ```
 
@@ -31,33 +36,79 @@ table(sleep[,c("group", "group_c")])
 
 Base plot on raw data
 =====================
-```{r}
+```{r, echo = 1:2}
 base_plot <- ggplot(sleep, aes(x = group_c, y = extra)) +
-  geom_point()
+  geom_point(aes(color = factor(group_c)), size = 5,
+             position = position_jitter(0.1, 0.0))
+
+theme_colors <- list(
+  green = "#66c2a5",  # colorbrewer.org
+  orange = "#fc8d62", #
+  blue = "#8da0cb"    #
+)
+base_plot <- base_plot +
+  scale_x_continuous("", 
+    breaks = c(-0.5, 0.5),
+    labels = c("Placebo", "Experimental")
+  ) +
+  scale_y_continuous("Extra Sleep (hr)",
+    breaks = -2:6
+  ) +
+  scale_color_manual(
+    values = c(theme_colors[["green"]], theme_colors[["blue"]])
+  ) +
+  coord_cartesian(xlim = c(-1.1, 1.1)) +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")
 base_plot
 ```
 
-Fit the model
-=============
+===
+```{r, echo = 1}
+sleep %>% group_by(group_c) %>% summarize(extra = mean(extra))
+base_plot + 
+  stat_summary(fun.y = mean, geom = "point", shape = 18, size = 8,
+               color = theme_colors[["orange"]]) +
+  stat_summary(fun.data = mean_se, geom = "linerange", size = 2,
+               color = theme_colors[["orange"]])
+```
+
+===
+Linear regression
 ```{r}
-sleep_from_group <- lm(extra ~ group_c, data = sleep)
-params <- tidy(sleep_from_group)  # library(broom)
+sleep_mod <- lm(extra ~ group_c, data = sleep)
+params <- tidy(sleep_mod)  # library(broom)
 params
+```
+
+_t_-test
+```{r}
+tidy(t.test(extra ~ group_c, data = sleep)) %>%
+  select(estimate, statistic, p.value)
 ```
 
 Plotting slopes
 ===============
-```{r}
+```{r, echo = 1}
 abline_plot <- base_plot + 
-  geom_abline(intercept = 1.54, slope = 1.58)
+  geom_abline(intercept = 1.54, slope = 1.58,
+              color = theme_colors[["orange"]], size = 2)
 abline_plot
+```
+
+Sanity check
+============
+```{r}
+abline_plot + 
+  stat_summary(fun.y = mean, geom = "point", shape = 16, size = 8,
+               color = theme_colors[["orange"]])
 ```
 
 Using predict()
 ===============
 ```{r}
 x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
-y_values <- predict(sleep_from_group, newdata = x_values)
+y_values <- predict(sleep_mod, newdata = x_values)
 estimates <- data.frame(x_values, extra = y_values)
 estimates
 ```
@@ -65,35 +116,30 @@ estimates
 Using predict()
 ===============
 ```{r}
-abline_plot + geom_point(data = estimates, shape = 1)
+abline_plot + geom_point(data = estimates, 
+  shape = 16, size = 8, color = theme_colors[["orange"]])
+```
+
+Using predict()
+===============
+```{r}
+groups <- data.frame(group_c = unique(sleep$group_c))
+estimates <- predict(sleep_mod, groups, se.fit = TRUE) %>%
+  cbind(groups, .) %>% select(group_c, extra = fit, se = se.fit)
+estimates
 ```
 
 Layer on the predictions
 ========================
-```{r, echo = FALSE}
-groups <- data.frame(group_c = unique(sleep$group_c))
-estimates <- predict(sleep_from_group, groups, se.fit = TRUE) %>%
-  cbind(groups, .) %>% select(group_c, extra = fit, se = se.fit)
-
+```{r, echo = 1}
 sleep_plot <- base_plot + 
   geom_bar(aes(fill = as.factor(group_c)), data = estimates, 
-    stat = "identity", alpha = 0.4) +
+    stat = "identity", alpha = 0.4, color = "black") +
   geom_linerange(aes(ymin = extra - se, ymax = extra + se),
-    data = estimates)
+    data = estimates, size = 2)
+sleep_plot <- sleep_plot +
+  scale_fill_manual(
+    values = c(theme_colors[["green"]], theme_colors[["blue"]])
+  )
 sleep_plot
-```
-
-Sanity checks
-=============
-```{r}
-sleep_plot + 
-  stat_summary(fun.y = mean, geom = "point", 
-               shape = 2, size = 6)
-```
-
-Sanity checks
-=============
-```{r}
-sleep_plot +
-  geom_line(aes(group = 1), data = estimates)
 ```
