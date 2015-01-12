@@ -13,43 +13,46 @@ opts_chunk$set(fig.align = "center",
                fig.width = 10,
                fig.height = 10)
 ```
+`bitly.com/visualizing-lmer`
 
 Principles
 ==========
 * `lm` parameters as slopes
 * use `predict` to draw the model
-* base plot on observations, layer on predictions
+* plot observations, layer predictions
 
-The data
-========
+Student's Sleep Data
+====================
 ```{r}
-#?sleep
+# ?sleep
+(N = nrow(sleep)) # let's forget that the data is repeated measures for now
 head(sleep)
 ```
 
-Preparing
-=========
+Dealing with factors
+====================
 ```{r}
 sleep$group_c <- as.numeric(sleep$group) - 1.5
 table(sleep[,c("group", "group_c")])
 ```
 
-Base plot on raw data
-=====================
-```{r, echo = 1:2}
+Start with observations
+=======================
+```{r, echo = 2}
+set.seed(1122015)
 base_plot <- ggplot(sleep, aes(x = group_c, y = extra)) +
   geom_point(aes(color = factor(group_c)), size = 5,
              position = position_jitter(0.1, 0.0))
-
+# style once for all plots
 theme_colors <- list(
   green = "#66c2a5",  # colorbrewer.org
   orange = "#fc8d62", #
   blue = "#8da0cb"    #
 )
 base_plot <- base_plot +
-  scale_x_continuous("", 
+  scale_x_continuous("Drug Assigned", 
     breaks = c(-0.5, 0.5),
-    labels = c("Placebo", "Experimental")
+    labels = c("Drug X", "Drug Y")
   ) +
   scale_y_continuous("Extra Sleep (hr)",
     breaks = -2:6
@@ -63,14 +66,31 @@ base_plot <- base_plot +
 base_plot
 ```
 
-===
+Calculating descriptives is easy
+================================
 ```{r, echo = 1}
-sleep %>% group_by(group_c) %>% summarize(extra = mean(extra))
 base_plot + 
   stat_summary(fun.y = mean, geom = "point", shape = 18, size = 8,
                color = theme_colors[["orange"]]) +
   stat_summary(fun.data = mean_se, geom = "linerange", size = 2,
                color = theme_colors[["orange"]])
+```
+
+"Prove it"
+==========
+```{r, echo = 1}
+test <- sleep %>% group_by(group_c) %>% 
+  summarize(
+    se = sqrt( var(extra)/n() ),
+    extra = mean(extra)
+  )
+base_plot + 
+  stat_summary(fun.y = mean, geom = "point", shape = 18, size = 8,
+               color = theme_colors[["orange"]]) +
+  stat_summary(fun.data = mean_se, geom = "linerange", size = 2,
+               color = theme_colors[["orange"]]) +
+  geom_linerange(aes(x=group_c+0.1, ymin=extra-se, ymax=extra+se), 
+                 data = test, size = 2)
 ```
 
 ===
@@ -87,12 +107,12 @@ tidy(t.test(extra ~ group_c, data = sleep)) %>%
   select(estimate, statistic, p.value)
 ```
 
-Plotting slopes
-===============
+geom_abline takes formulas
+==========================
 ```{r, echo = 1}
 abline_plot <- base_plot + 
   geom_abline(intercept = 1.54, slope = 1.58,
-              color = theme_colors[["orange"]], size = 2)
+               size = 2, color = theme_colors[["orange"]])
 abline_plot
 ```
 
@@ -110,6 +130,11 @@ Using predict()
 x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
 y_values <- predict(sleep_mod, newdata = x_values)
 estimates <- data.frame(x_values, extra = y_values)
+
+# the ones we care about
+filter(estimates, group_c %in% c(-0.5, 0.5))
+
+# but remember what `predict` is doing
 estimates
 ```
 
@@ -118,6 +143,27 @@ Using predict()
 ```{r}
 abline_plot + geom_point(data = estimates, 
   shape = 16, size = 8, color = theme_colors[["orange"]])
+```
+
+Exhibit B
+=========
+`predict(..., se.fit = TRUE)`
+```{r}
+x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
+estimates <- predict(sleep_mod, newdata = x_values, se.fit = TRUE) %>%
+  cbind(x_values, .) %>% select(group_c, extra = fit, se = se.fit)
+estimates
+```
+
+Exhibit B
+=========
+`predict(..., se.fit = TRUE)`
+```{r}
+move_intercept <- function(center) {
+  group_c <- sleep$group_c - center
+  tidy( lm(sleep$extra ~ group_c) )[[1,3]]
+}
+cbind(estimates, se2 = sapply(estimates$group_c, move_intercept))
 ```
 
 Using predict()

@@ -1,6 +1,6 @@
 slides/
 .Rproj.user
 packrat/lib*/
-packrat/src/
 *.md
 *figure/
+packrat/src/
