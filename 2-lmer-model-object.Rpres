@@ -1,0 +1,168 @@
+2-lmer-model-object
+===================
+author: Pierce Edmiston
+date: 1/21/2015
+css: visualizing-lmer.css
+```{r setup, echo = FALSE, warning = FALSE}
+library(ggplot2)
+library(dplyr)
+library(broom)
+library(reshape2)
+library(knitr)
+opts_chunk$set(fig.align = "center",
+               fig.width = 10,
+               fig.height = 10)
+gg_base_size <- 20
+
+sleep$group_c <- as.numeric(sleep$group) - 1.5
+sleep <- rename(sleep, subject = ID)
+```
+`github.com/pedmiston/visualizing-lmer`
+
+Repeated measures design
+========================
+```{r}
+dcast(sleep, subject ~ group, value.var = "extra")
+```
+
+===
+Linear regression, cont.
+```{r, warning = FALSE}
+library(lme4)
+random_intercept <- lmer(extra ~ group_c + (1|subject), data = sleep)
+tidy(random_intercept, effects = "fixed")
+```
+
+paired _t_-test
+```{r}
+tidy( t.test(extra ~ group, data = sleep, paired = TRUE) ) %>%
+  select(estimate, statistic, p.value)
+```
+
+What's in the model?
+====================
+```{r}
+summary(random_intercept)
+```
+
+Fixed effects
+=============
+```{r}
+# model with random intercepts
+fixef(random_intercept)
+
+# model without random intercepts
+coef( lm(extra ~ group_c, data = sleep) )
+```
+
+Random effects
+==============
+```{r, echo = c(1,3)}
+random_effects <- ranef(random_intercept)[["subject"]]
+random_effects
+mean(random_effects[[1]])
+```
+
+coef = fixef + ranef
+====================
+```{r, echo = 1}
+model_estimates <- coef(random_intercept)[["subject"]] %>%
+  select(intercept = 1, group_c = 2)
+model_estimates$subject <- row.names(model_estimates)
+model_estimates
+```
+
+Layer on the predictions
+========================
+```{r, echo = 5}
+set.seed(1212015)
+
+base_plot <- ggplot(sleep, aes(x = group_c, y = extra, color = subject)) +
+  geom_point(size = 5, position = position_jitter(0.1, 0.0)) +
+  scale_x_continuous("Drug Assigned", 
+    breaks = c(-0.5, 0.5),
+    labels = c("Drug X", "Drug Y")
+  ) +
+  scale_y_continuous("Extra Sleep (hr)",
+    breaks = -2:6
+  ) +
+  coord_cartesian(xlim = c(-1.1, 1.1)) +
+  theme_bw(base_size = gg_base_size) +
+  theme(legend.position = "none")
+
+subj_lines <- base_plot +
+  geom_abline(aes(intercept = intercept, slope = group_c, color = subject),
+              data = model_estimates)
+subj_lines
+```
+
+Why isn't it just one line per subject?
+=======================================
+```{r}
+subj_lines + stat_smooth(aes(group = subject), method = "lm", lty = 2)
+```
+
+===
+```{r, echo = 1}
+subj_lines + stat_summary(aes(x = 0.0, group = subject), 
+  fun.y = mean, geom = "point", size = 5, shape = 1)
+```
+
+Means for each subject
+======================
+```{r, echo = 1}
+subj_means <- sleep %>%
+  group_by(subject) %>%
+  summarize(intercept = mean(extra))
+compare_means <- data.frame(
+  model_intercepts = model_estimates[["intercept"]],
+  subj_intercepts = subj_means[["intercept"]]
+)
+bounds <- c(-0.8, 4.5)
+ggplot(compare_means, aes(subj_intercepts, model_intercepts)) +
+  geom_point() + geom_abline(intercept = 0, slope = 1, lty = 2) +
+  coord_cartesian(xlim = bounds, ylim = bounds) +
+  theme_bw(base_size = gg_base_size)
+```
+
+Random effects are sampled
+==========================
+```{r}
+summary(random_intercept)$varcor
+sd(subj_means$intercept)
+sd(ranef(random_intercept)[["subject"]][[1]])
+```
+
+===
+```{r, echo = FALSE}
+ideal_distribution <- dplyr::data_frame(
+  x = seq(-5, 5, by = 0.01),
+  y = dnorm(x = x, mean = 0, sd = 1.68770)
+)
+
+theme_colors <- list(
+  green = "#66c2a5",  # colorbrewer.org
+  orange = "#fc8d62", #
+  blue = "#8da0cb"    #
+)
+
+distribution_legend <- dplyr::data_frame(
+  color = unlist(theme_colors, use.names = FALSE),
+  text = c("ideal", "estimated", "observed"),
+  pos = c(0.20, 0.18, 0.16)
+)
+
+names(random_effects) <- "intercept"
+subj_means$intercept_c <- subj_means$intercept - mean(subj_means$intercept)
+ggplot() + 
+  geom_line(aes(x,y), data = ideal_distribution,
+    color = theme_colors[["green"]], size = 2.0) +
+  geom_density(aes(x = intercept), data = random_effects,
+     color = theme_colors[["orange"]], size = 2.0) +
+  geom_density(aes(x = intercept_c), data = subj_means, 
+     color = theme_colors[["blue"]], size = 2.0) +
+  geom_text(aes(x = 2.5, y = pos, label = text, color = color), 
+      data = distribution_legend, size = 8) +
+  theme_bw(base_size = gg_base_size) +
+  theme(legend.position = "none")
+```
