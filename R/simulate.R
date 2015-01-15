@@ -11,7 +11,7 @@ to_cor_matrix <- function(correlations, names) {
     cor_matrix <- diag(length(correlations))
   }
   cor_matrix[row(cor_matrix) > col(cor_matrix)] <- unlist(correlations)
-  cor_matrix <- cor_matrix + t(cor_matrix) 
+  cor_matrix <- cor_matrix + t(cor_matrix)
   diag(cor_matrix) <- 1
   dimnames(cor_matrix) <- list(names, names)
   cor_matrix
@@ -25,9 +25,9 @@ cor_to_cov <- function(cor_matrix, stdevs) {
 }
 
 #' Generates by-subject effects for simulating within-subject data.
-#' 
+#'
 #' @param num_subjects The number of subjects in the sample
-#' @param grand_means A data.frame with columns for Mean and SD and rows for 
+#' @param grand_means A data.frame with columns for Mean and SD and rows for
 #'          of the variables.
 #' @param cor_matrix The desired symmetric correlation matrix for all variables.
 #' @return A data.frame with columns for subject and each parameter
@@ -39,7 +39,7 @@ generate_subject_effects <- function(num_subjects, grand_means, cor_matrix) {
 }
 
 #' Given by-subject effects, generates random data for each subject.
-#' 
+#'
 #' @param parameters A list with slots for Subject, Intercept, Slope, and Error
 #' @return A data.frame in the form of the sleepstudy package in lme4
 generate_subject_data <- function(subj_effects) {
