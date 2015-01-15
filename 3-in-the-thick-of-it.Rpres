@@ -1,0 +1,191 @@
+3-in-the-thick-of-it
+====================
+author: Pierce Edmiston
+date: 1/21/2015
+css: visualizing-lmer.css
+```{r setup, echo = FALSE, warning = FALSE}
+library(broom)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(lme4)
+library(reshape2)
+
+project_settings <- yaml.load_file("visualizing-lmer.yaml")
+
+opts_chunk$set(fig.align = "center",
+               fig.width = project_settings[["opts_width"]],
+               fig.height = project_settings[["opts_height"]])
+gg_base_size <- project_settings[["gg_base_size"]]
+```
+
+More sleep data
+===============
+```{r, message = FALSE}
+library(lme4)
+#?sleepstudy
+names(sleepstudy) <- tolower(names(sleepstudy))
+head(sleepstudy, n = 12)
+```
+
+Centering
+=========
+```{r}
+unique(sleepstudy$days)
+median(unique(sleepstudy$days))
+mean(sleepstudy$days)  # potential gotcha: equals median because no missing data
+
+days_map <- dplyr::data_frame(  # use dplyr to build incrementally
+    days = unique(sleepstudy$days),
+    days_c = days - median(days)
+  )
+days_map
+
+sleepstudy$days_c <- sleepstudy$days - median(sleepstudy$days)
+```
+
+Base plot
+=========
+```{r, echo = 1}
+base_plot <- ggplot(sleepstudy, aes(x = days_c, y = reaction)) +
+  geom_point(aes(color = subject), position = position_jitter(0.1, 0.0))
+
+base_plot <- base_plot +
+  scale_x_continuous("Amount of Sleep Deprivation (Days)",
+    breaks = days_map$days_c,
+    labels = days_map$days
+  ) + 
+  scale_y_continuous("Average Reaction Time (ms)",
+    breaks = seq(200, 500, by = 50)
+  ) +
+  theme_bw(base_size = gg_base_size)
+
+base_plot
+```
+
+===
+```{r}
+base_plot +
+  stat_smooth(method = "lm", se = FALSE, color = "gray")
+```
+
+Non-independence
+================
+[Simpson's Paradox](http://vudlab.com/simpsons/)
+
+Non-independence
+================
+```{r}
+base_plot +
+  stat_smooth(aes(group = subject, color = subject), method = "lm", se = FALSE)
+```
+
+"split-apply-combine"
+=====================
+```{r}
+# step 1: define your apply function
+fit_lm <- function(y, x, return_coef) { 
+  mod <- lm(y ~ x)
+  coef(mod)[return_coef]
+}
+
+# step 2: chain it using dplyr
+slopes <- sleepstudy %>% 
+  group_by(subject) %>%
+  summarize(
+    slope = fit_lm(reaction, days, return_coef = 2)
+  ) ## "combine" is implicit
+slopes
+```
+
+Is the average person's slope greater than 0?
+=============================================
+```{r}
+simple_slopes <- lm(slope ~ 1, data = slopes)
+tidy(simple_slopes)
+
+# Look at that, same as a t-test!
+tidy( t.test(slopes$slope) )
+
+# How does it compare to the non-independence model?
+not_independent <- lm(reaction ~ days, data = sleepstudy)
+
+compare <- rbind(
+    summary(not_independent)$coefficients["days", 1:2],
+    summary(simple_slopes)$coefficients["(Intercept)", 1:2]
+  ) %>% as.data.frame(.) %>% 
+  mutate(Type = c("not_independent", "simple_slopes")) %>%
+  select(Type = 3, Slope = 1, SE = 2)
+compare
+```
+
+lmer enters the ring
+====================
+```{r}
+random_intercept <- lmer(reaction ~ days_c + (1|subject), data = sleepstudy)
+summary(random_intercept)
+```
+
+Compare slopes and error
+========================
+```{r, eval = FALSE}
+compare <- rbind(
+    summary(not_independent)$coefficients["Days", 1:2],
+    summary(simple_slopes)$coefficients["(Intercept)", 1:2],
+    summary(random_intercept)$coefficients["Days", 1:2]
+  ) %>% as.data.frame(.) %>% 
+  mutate(Type = c("not_independent", "simple_slopes", "random_intercept")) %>%
+  select(Type = 3, Slope = 1, SE = 2)
+compare
+```
+
+lmer model object
+=================
+```{r, echo = FALSE}
+fixef(random_intercept)
+ranef(random_intercept)
+```
+
+Comparing intercepts
+====================
+```{r, eval = FALSE}
+#' Random intercepts
+
+summary(random_intercept)
+ranef(random_intercept) ## ugly duckling
+
+random_intercepts <- ranef(random_intercept)$Subject %>% 
+  select(RandomReactionDiff = 1)
+random_intercepts$Subject <- row.names(random_intercepts); row.names(random_intercepts) <- NULL
+
+#' Manual intercepts
+
+manual_intercepts <- df %>%
+  group_by(Subject) %>%
+  summarize(AveReaction = mean(Reaction)) %>%
+  mutate(ManualReactionDiff = AveReaction - mean(AveReaction))
+manual_intercepts
+
+#' Try to have the simplest data.frames possible
+
+manual_intercepts <- select(manual_intercepts, -AveReaction)
+
+#' Compare the model random effects to our calculated random effects
+
+compare_intercept_diffs <- merge(manual_intercepts, random_intercepts)
+compare_intercept_diffs
+```
+
+Intercept error
+===============
+```{r}
+# show that adding random intercepts increases error compared to the non-independent model
+```
+
+
+An aside
+========
+To get (fixed effect) predictions and standard errors thereof:
+```{r, eval = FALSE}
+AICcmodavg::predictSE(lmer_model, newdata = data.frame(...))
+```

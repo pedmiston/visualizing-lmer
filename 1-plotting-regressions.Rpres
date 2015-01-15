@@ -4,14 +4,20 @@ author: Pierce Edmiston
 date: 1/21/2015
 css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
-library(ggplot2)
-library(dplyr)
 library(broom)
-library(reshape2)
+library(car)
+library(dplyr)
+library(ggplot2)
 library(knitr)
+library(reshape2)
+library(yaml)
+
+project_settings <- yaml.load_file("visualizing-lmer.yaml")
+
 opts_chunk$set(fig.align = "center",
-               fig.width = 10,
-               fig.height = 10)
+               fig.width = project_settings[["opts_width"]],
+               fig.height = project_settings[["opts_height"]])
+gg_base_size <- project_settings[["gg_base_size"]]
 ```
 `github.com/pedmiston/visualizing-lmer`
 
@@ -25,24 +31,26 @@ Student's Sleep Data
 ====================
 ```{r}
 # ?sleep
-(N = nrow(sleep)) # let's forget that the data is repeated measures for now
+(N = nrow(sleep)) # ignoring ID for now
 head(sleep)
 ```
 
 Dealing with factors
 ====================
 ```{r}
-sleep$group_c <- as.numeric(sleep$group) - 1.5
+sleep$group_c <- recode(sleep$group, "'1' = -0.5; '2' = 0.5", 
+                        as.factor.result = FALSE)
 table(sleep[,c("group", "group_c")])
 ```
 
-Start with observations
-=======================
+Start plot with observations
+============================
 ```{r, echo = 2}
-set.seed(1122015)
+set.seed(1212015)
 base_plot <- ggplot(sleep, aes(x = group_c, y = extra)) +
   geom_point(aes(color = factor(group_c)), size = 5,
              position = position_jitter(0.1, 0.0))
+
 # style once for all plots
 theme_colors <- list(
   green = "#66c2a5",  # colorbrewer.org
@@ -61,13 +69,13 @@ base_plot <- base_plot +
     values = c(theme_colors[["green"]], theme_colors[["blue"]])
   ) +
   coord_cartesian(xlim = c(-1.1, 1.1)) +
-  theme_bw(base_size = 20) +
+  theme_bw(base_size = gg_base_size) +
   theme(legend.position = "none")
 base_plot
 ```
 
-Calculating descriptives is easy
-================================
+Use stat_summary() to add descriptives
+======================================
 ```{r, echo = 1}
 base_plot + 
   stat_summary(fun.y = mean, geom = "point", shape = 18, size = 8,
@@ -76,13 +84,13 @@ base_plot +
                color = theme_colors[["orange"]])
 ```
 
-"Prove it"
-==========
+Or add a layer with new data
+============================
 ```{r, echo = 1}
-test <- sleep %>% group_by(group_c) %>% 
+custom_error <- sleep %>% group_by(group_c) %>% 
   summarize(
     se = sqrt( var(extra)/n() ),
-    extra = mean(extra)
+    extra = mean(extra)  # note the order
   )
 base_plot + 
   stat_summary(fun.y = mean, geom = "point", shape = 18, size = 8,
@@ -90,63 +98,66 @@ base_plot +
   stat_summary(fun.data = mean_se, geom = "linerange", size = 2,
                color = theme_colors[["orange"]]) +
   geom_linerange(aes(x=group_c+0.1, ymin=extra-se, ymax=extra+se), 
-                 data = test, size = 2)
+                 data = custom_error, size = 2)
 ```
 
 ===
 Linear regression
-```{r}
+```{r, echo = 1}
 sleep_mod <- lm(extra ~ group_c, data = sleep)
 params <- tidy(sleep_mod)  # library(broom)
 params
 ```
 
 _t_-test
-```{r}
-tidy(t.test(extra ~ group_c, data = sleep)) %>%
-  select(estimate, statistic, p.value)
+```{r, echo = 1}
+sleep_test <- t.test(extra ~ group_c, data = sleep)
+tidy(sleep_test) %>% select(estimate, statistic, p.value)
 ```
 
-geom_abline takes formulas
-==========================
+Plot formulas with geom_abline()
+================================
 ```{r, echo = 1}
 abline_plot <- base_plot + 
   geom_abline(intercept = 1.54, slope = 1.58,
-               size = 2, color = theme_colors[["orange"]])
+              size = 2, color = theme_colors[["orange"]])
 abline_plot
 ```
 
 Sanity check
 ============
 ```{r}
-abline_plot + 
-  stat_summary(fun.y = mean, geom = "point", shape = 16, size = 8,
-               color = theme_colors[["orange"]])
+abline_plot + stat_summary(fun.y = mean, geom = "point", 
+  shape = 16, size = 8, color = theme_colors[["orange"]])
 ```
 
-Using predict()
-===============
+Draw the line with predict()
+============================
 ```{r}
 x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
 y_values <- predict(sleep_mod, newdata = x_values)
 estimates <- data.frame(x_values, extra = y_values)
+```
 
-# the ones we care about
+The values we care about
+```{r}
 filter(estimates, group_c %in% c(-0.5, 0.5))
+```
 
-# but remember what `predict` is doing
+But remember what `predict()` is doing
+```{r}
 estimates
 ```
 
-Using predict()
-===============
+Draw the line with predict()
+============================
 ```{r}
 abline_plot + geom_point(data = estimates, 
   shape = 16, size = 8, color = theme_colors[["orange"]])
 ```
 
-Exhibit B
-=========
+Where is the error?
+===================
 `predict(..., se.fit = TRUE)`
 ```{r}
 x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
@@ -155,13 +166,13 @@ estimates <- predict(sleep_mod, newdata = x_values, se.fit = TRUE) %>%
 estimates
 ```
 
-Exhibit B
-=========
+Where is the error?
+===================
 `predict(..., se.fit = TRUE)`
 ```{r}
 move_intercept <- function(center) {
-  group_c <- sleep$group_c - center
-  tidy( lm(sleep$extra ~ group_c) )[[1,3]]
+  new_center <- sleep$group_c - center
+  tidy( lm(sleep$extra ~ new_center) )[[1,3]] # (Intercept) error
 }
 cbind(estimates, se2 = sapply(estimates$group_c, move_intercept))
 ```

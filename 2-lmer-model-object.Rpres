@@ -9,10 +9,14 @@ library(dplyr)
 library(broom)
 library(reshape2)
 library(knitr)
+library(yaml)
+
+project_settings <- yaml.load_file("visualizing-lmer.yaml")
+
 opts_chunk$set(fig.align = "center",
-               fig.width = 10,
-               fig.height = 10)
-gg_base_size <- 20
+               fig.width = project_settings[["opts_width"]],
+               fig.height = project_settings[["opts_height"]])
+gg_base_size <- project_settings[["gg_base_size"]]
 
 sleep$group_c <- as.numeric(sleep$group) - 1.5
 sleep <- rename(sleep, subject = ID)
@@ -35,8 +39,8 @@ tidy(random_intercept, effects = "fixed")
 
 paired _t_-test
 ```{r}
-tidy( t.test(extra ~ group, data = sleep, paired = TRUE) ) %>%
-  select(estimate, statistic, p.value)
+t.test(extra ~ group, data = sleep, paired = TRUE) %>%
+  tidy(.) %>% select(estimate, statistic, p.value)
 ```
 
 What's in the model?
@@ -52,7 +56,8 @@ Fixed effects
 fixef(random_intercept)
 
 # model without random intercepts
-coef( lm(extra ~ group_c, data = sleep) )
+simple_lm <- lm(extra ~ group_c, data = sleep)
+coef(simple_lm)
 ```
 
 Random effects
