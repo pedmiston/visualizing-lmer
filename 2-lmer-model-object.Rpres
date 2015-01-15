@@ -4,11 +4,12 @@ author: Pierce Edmiston
 date: 1/21/2015
 css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
-library(ggplot2)
-library(dplyr)
 library(broom)
-library(reshape2)
+library(car)
+library(dplyr)
+library(ggplot2)
 library(knitr)
+library(reshape2)
 library(yaml)
 
 project_settings <- yaml.load_file("visualizing-lmer.yaml")
@@ -18,29 +19,51 @@ opts_chunk$set(fig.align = "center",
                fig.height = project_settings[["opts_height"]])
 gg_base_size <- project_settings[["gg_base_size"]]
 
-sleep$group_c <- as.numeric(sleep$group) - 1.5
+sleep$group <- recode(sleep$group, "'1' = 'drug_x'; '2' = 'drug_y'",
+                      as.factor.result = FALSE)
+sleep$group_c <- recode(sleep$group, "'drug_x' = -0.5; 'drug_y' = 0.5")
 sleep <- rename(sleep, subject = ID)
 ```
 `github.com/pedmiston/visualizing-lmer`
 
+Principles
+==========
+* fixed effects vs random effects
+* the power of ggplot's facets
+* the assumptions of random effects
+
 Repeated measures design
 ========================
 ```{r}
-dcast(sleep, subject ~ group, value.var = "extra")
+dcast(sleep, subject ~ group, value.var = "extra") %>%
+  mutate(
+    random_effect = rowMeans( cbind(drug_x, drug_y) ),
+    fixed_effect = drug_x - drug_y
+  )
 ```
 
 ===
 Linear regression, cont.
-```{r, warning = FALSE}
+```{r, echo = -3, warning = FALSE}
 library(lme4)
 random_intercept <- lmer(extra ~ group_c + (1|subject), data = sleep)
 tidy(random_intercept, effects = "fixed")
 ```
 
 paired _t_-test
-```{r}
-t.test(extra ~ group, data = sleep, paired = TRUE) %>%
-  tidy(.) %>% select(estimate, statistic, p.value)
+```{r, echo = 1}
+test_delta <- t.test(extra ~ group, data = sleep, paired = TRUE)
+tidy(test_delta) %>% select(estimate, statistic, p.value)
+```
+
+Random effects are nested formulas
+==================================
+```{r, eval = FALSE}
+# (1|subject)
+sleep %>% group_by(subject) %>%
+  do({
+    lm(extra ~ 1, data = .)
+  })
 ```
 
 What's in the model?
@@ -51,11 +74,13 @@ summary(random_intercept)
 
 Fixed effects
 =============
+lmer
 ```{r}
-# model with random intercepts
 fixef(random_intercept)
+```
 
-# model without random intercepts
+lm
+```{r}
 simple_lm <- lm(extra ~ group_c, data = sleep)
 coef(simple_lm)
 ```
@@ -65,15 +90,21 @@ Random effects
 ```{r, echo = c(1,3)}
 random_effects <- ranef(random_intercept)[["subject"]]
 random_effects
-mean(random_effects[[1]])
+mean(random_effects[[1]])  # random effects centered on 0
 ```
 
-coef = fixef + ranef
-====================
+coef() = fixef() + ranef()
+==========================
 ```{r, echo = 1}
+coef(random_intercept)
+```
+
+A line for every subject
+```{r, echo = FALSE}
 model_estimates <- coef(random_intercept)[["subject"]] %>%
   select(intercept = 1, group_c = 2)
 model_estimates$subject <- row.names(model_estimates)
+model_estimates <- select(model_estimates, subject, intercept, group_c)
 model_estimates
 ```
 
@@ -83,7 +114,7 @@ Layer on the predictions
 set.seed(1212015)
 
 base_plot <- ggplot(sleep, aes(x = group_c, y = extra, color = subject)) +
-  geom_point(size = 5, position = position_jitter(0.1, 0.0)) +
+  geom_point(size = 5, position = position_jitter(0.0, 0.0)) +
   scale_x_continuous("Drug Assigned", 
     breaks = c(-0.5, 0.5),
     labels = c("Drug X", "Drug Y")
@@ -95,22 +126,23 @@ base_plot <- ggplot(sleep, aes(x = group_c, y = extra, color = subject)) +
   theme_bw(base_size = gg_base_size) +
   theme(legend.position = "none")
 
-subj_lines <- base_plot +
-  geom_abline(aes(intercept = intercept, slope = group_c, color = subject),
-              data = model_estimates)
+subj_lines <- base_plot + geom_abline(data = model_estimates,
+  mapping = aes(intercept = intercept, slope = group_c, color = subject))
 subj_lines
 ```
 
-Why isn't it just one line per subject?
-=======================================
-```{r}
-subj_lines + stat_smooth(aes(group = subject), method = "lm", lty = 2)
+facet_wrap()
+============
+```{r, fig.width = project_settings[["opts_width"]]+3}
+subj_lines + facet_wrap("subject", ncol = 5)
 ```
 
 ===
-```{r, echo = 1}
-subj_lines + stat_summary(aes(x = 0.0, group = subject), 
-  fun.y = mean, geom = "point", size = 5, shape = 1)
+```{r, echo = 1, fig.width = project_settings[["opts_width"]]+3}
+subj_lines + facet_wrap("subject", ncol = 5) + 
+  stat_smooth(aes(group = subject), method = "lm", lty = 2) +
+  stat_summary(aes(x = 0.0, group = subject), fun.y = mean, 
+               geom = "point", size = 5, shape = 1)
 ```
 
 Means for each subject
@@ -125,7 +157,7 @@ compare_means <- data.frame(
 )
 bounds <- c(-0.8, 4.5)
 ggplot(compare_means, aes(subj_intercepts, model_intercepts)) +
-  geom_point() + geom_abline(intercept = 0, slope = 1, lty = 2) +
+  geom_point(size = 5) + geom_abline(intercept = 0, slope = 1, lty = 2) +
   coord_cartesian(xlim = bounds, ylim = bounds) +
   theme_bw(base_size = gg_base_size)
 ```
@@ -133,7 +165,7 @@ ggplot(compare_means, aes(subj_intercepts, model_intercepts)) +
 Random effects are sampled
 ==========================
 ```{r}
-summary(random_intercept)$varcor
+VarCorr(random_intercept)
 sd(subj_means$intercept)
 sd(ranef(random_intercept)[["subject"]][[1]])
 ```
@@ -166,8 +198,8 @@ ggplot() +
      color = theme_colors[["orange"]], size = 2.0) +
   geom_density(aes(x = intercept_c), data = subj_means, 
      color = theme_colors[["blue"]], size = 2.0) +
-  geom_text(aes(x = 2.5, y = pos, label = text, color = color), 
-      data = distribution_legend, size = 8) +
+  geom_text(aes(x = 2.5, y = pos, label = text, color = text), 
+      data = distribution_legend, size = 8) + 
   theme_bw(base_size = gg_base_size) +
   theme(legend.position = "none")
 ```

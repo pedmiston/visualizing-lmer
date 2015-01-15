@@ -44,6 +44,11 @@ Version: 0.3.5
 Hash: e7d060475143d01752b05b88618edd81
 Requires: dplyr, plyr, psych, tidyr
 
+Package: car
+Source: CRAN
+Version: 2.0-22
+Hash: 2fb4da98043926a3745e0c6a2f23fd04
+
 Package: colorspace
 Source: CRAN
 Version: 1.2-4
@@ -190,8 +195,19 @@ Source: CRAN
 Version: 0.6.2
 Hash: cdde0cfa0f52cffeaca23a11a3899779
 
+Package: testthat
+Source: CRAN
+Version: 0.9.1
+Hash: 8b05e97c7401ae4f8b5dfbaa44cfcf20
+Requires: digest
+
 Package: tidyr
 Source: CRAN
 Version: 0.2.0
 Hash: 3b379415e9e88d4f559b380819893304
 Requires: dplyr, lazyeval, reshape2, stringi
+
+Package: yaml
+Source: CRAN
+Version: 2.1.13
+Hash: e5d041c001f6d641fd009c1f6ef7d831
