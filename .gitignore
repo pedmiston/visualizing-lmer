@@ -4,3 +4,4 @@ packrat/lib*/
 *.md
 *figure/
 packrat/src/
+.Rhistory

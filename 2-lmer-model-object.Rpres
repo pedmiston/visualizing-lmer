@@ -18,188 +18,256 @@ opts_chunk$set(fig.align = "center",
                fig.width = project_settings[["opts_width"]],
                fig.height = project_settings[["opts_height"]])
 gg_base_size <- project_settings[["gg_base_size"]]
-
-sleep$group <- recode(sleep$group, "'1' = 'drug_x'; '2' = 'drug_y'",
-                      as.factor.result = FALSE)
-sleep$group_c <- recode(sleep$group, "'drug_x' = -0.5; 'drug_y' = 0.5")
-sleep <- rename(sleep, subject = ID)
 ```
 `github.com/pedmiston/visualizing-lmer`
 
-Principles
-==========
+Part 2
+======
 * fixed effects vs random effects
-* the power of ggplot's facets
-* the assumptions of random effects
+* the `lmer` model object
+* random intercepts and random slopes
 
-Repeated measures design
-========================
-```{r}
-dcast(sleep, subject ~ group, value.var = "extra") %>%
-  mutate(
-    random_effect = rowMeans( cbind(drug_x, drug_y) ),
-    fixed_effect = drug_x - drug_y
-  )
-```
-
-===
-Linear regression, cont.
-```{r, echo = -3, warning = FALSE}
+More sleep data
+===============
+```{r, message = FALSE, echo = c(1, 7, 8)}
 library(lme4)
-random_intercept <- lmer(extra ~ group_c + (1|subject), data = sleep)
-tidy(random_intercept, effects = "fixed")
+# ?sleepstudy
+
+names(sleepstudy) <- tolower(names(sleepstudy))
+sleepstudy <- select(sleepstudy, subject, days, reaction)
+
+head(sleepstudy, n = 12)
+( N <- length(unique(sleepstudy$subject)) )
 ```
 
-paired _t_-test
-```{r, echo = 1}
-test_delta <- t.test(extra ~ group, data = sleep, paired = TRUE)
-tidy(test_delta) %>% select(estimate, statistic, p.value)
+Centering
+=========
+```{r, echo = c(1, 3, 4, 7)}
+unique(sleepstudy$days)
+
+# use dplyr::data_frame to build incrementally
+days_map <- dplyr::data_frame(  
+    days = unique(sleepstudy$days),
+    days_c = days - median(days)
+  )
+days_map
+
+sleepstudy <- left_join(sleepstudy, days_map)
+sleepstudy <- select(sleepstudy, subject, days, days_c, reaction)
 ```
 
-Random effects are nested formulas
-==================================
-```{r, eval = FALSE}
-# (1|subject)
-sleep %>% group_by(subject) %>%
-  do({
-    lm(extra ~ 1, data = .)
-  })
-```
-
-What's in the model?
-====================
-```{r}
-summary(random_intercept)
-```
-
-Fixed effects
-=============
-lmer
-```{r}
-fixef(random_intercept)
-```
-
-lm
-```{r}
-simple_lm <- lm(extra ~ group_c, data = sleep)
-coef(simple_lm)
-```
-
-Random effects
-==============
-```{r, echo = c(1,3)}
-random_effects <- ranef(random_intercept)[["subject"]]
-random_effects
-mean(random_effects[[1]])  # random effects centered on 0
-```
-
-coef() = fixef() + ranef()
-==========================
-```{r, echo = 1}
-coef(random_intercept)
-```
-
-A line for every subject
-```{r, echo = FALSE}
-model_estimates <- coef(random_intercept)[["subject"]] %>%
-  select(intercept = 1, group_c = 2)
-model_estimates$subject <- row.names(model_estimates)
-model_estimates <- select(model_estimates, subject, intercept, group_c)
-model_estimates
-```
-
-Layer on the predictions
-========================
-```{r, echo = 5}
-set.seed(1212015)
-
-base_plot <- ggplot(sleep, aes(x = group_c, y = extra, color = subject)) +
-  geom_point(size = 5, position = position_jitter(0.0, 0.0)) +
-  scale_x_continuous("Drug Assigned", 
-    breaks = c(-0.5, 0.5),
-    labels = c("Drug X", "Drug Y")
-  ) +
-  scale_y_continuous("Extra Sleep (hr)",
-    breaks = -2:6
-  ) +
-  coord_cartesian(xlim = c(-1.1, 1.1)) +
-  theme_bw(base_size = gg_base_size) +
-  theme(legend.position = "none")
-
-subj_lines <- base_plot + geom_abline(data = model_estimates,
-  mapping = aes(intercept = intercept, slope = group_c, color = subject))
-subj_lines
-```
-
-facet_wrap()
-============
-```{r, fig.width = project_settings[["opts_width"]]+3}
-subj_lines + facet_wrap("subject", ncol = 5)
-```
-
-===
-```{r, echo = 1, fig.width = project_settings[["opts_width"]]+3}
-subj_lines + facet_wrap("subject", ncol = 5) + 
-  stat_smooth(aes(group = subject), method = "lm", lty = 2) +
-  stat_summary(aes(x = 0.0, group = subject), fun.y = mean, 
-               geom = "point", size = 5, shape = 1)
-```
-
-Means for each subject
-======================
-```{r, echo = 1}
-subj_means <- sleep %>%
-  group_by(subject) %>%
-  summarize(intercept = mean(extra))
-compare_means <- data.frame(
-  model_intercepts = model_estimates[["intercept"]],
-  subj_intercepts = subj_means[["intercept"]]
-)
-bounds <- c(-0.8, 4.5)
-ggplot(compare_means, aes(subj_intercepts, model_intercepts)) +
-  geom_point(size = 5) + geom_abline(intercept = 0, slope = 1, lty = 2) +
-  coord_cartesian(xlim = bounds, ylim = bounds) +
-  theme_bw(base_size = gg_base_size)
-```
-
-Random effects are sampled
-==========================
-```{r}
-VarCorr(random_intercept)
-sd(subj_means$intercept)
-sd(ranef(random_intercept)[["subject"]][[1]])
-```
-
-===
-```{r, echo = FALSE}
-ideal_distribution <- dplyr::data_frame(
-  x = seq(-5, 5, by = 0.01),
-  y = dnorm(x = x, mean = 0, sd = 1.68770)
-)
-
+Ignoring subject
+================
+```{r, echo = 3}
 theme_colors <- list(
   green = "#66c2a5",  # colorbrewer.org
   orange = "#fc8d62", #
   blue = "#8da0cb"    #
 )
 
-distribution_legend <- dplyr::data_frame(
-  color = unlist(theme_colors, use.names = FALSE),
-  text = c("ideal", "estimated", "observed"),
-  pos = c(0.20, 0.18, 0.16)
-)
+base_plot <- ggplot(sleepstudy, aes(x = days_c, y = reaction)) +
+  geom_point(position = position_jitter(0.2, 0.0), 
+    size = 4, color = theme_colors[["green"]])
 
-names(random_effects) <- "intercept"
-subj_means$intercept_c <- subj_means$intercept - mean(subj_means$intercept)
-ggplot() + 
-  geom_line(aes(x,y), data = ideal_distribution,
-    color = theme_colors[["green"]], size = 2.0) +
-  geom_density(aes(x = intercept), data = random_effects,
-     color = theme_colors[["orange"]], size = 2.0) +
-  geom_density(aes(x = intercept_c), data = subj_means, 
-     color = theme_colors[["blue"]], size = 2.0) +
-  geom_text(aes(x = 2.5, y = pos, label = text, color = text), 
-      data = distribution_legend, size = 8) + 
+base_plot <- base_plot +
+  scale_x_continuous(
+    "Sleep Deprivation (days)", 
+    breaks = days_map$days_c,
+    labels = days_map$days
+  ) + 
+  scale_y_continuous(
+    "Average Reaction Time (ms)",
+    breaks = seq(150, 500, by = 50)
+  ) +
   theme_bw(base_size = gg_base_size) +
   theme(legend.position = "none")
+
+base_plot
+```
+
+Adding predictions
+==================
+```{r}
+simple_lm <- lm(reaction ~ days_c, data = sleepstudy)
+preds <- cbind(days_map, predict(simple_lm, newdata = days_map, se = TRUE)) %>%
+  select(days, days_c, reaction = fit, se = se.fit)
+
+base_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se),
+  data = preds, stat = "identity", color = theme_colors[["blue"]], size = 2)
+```
+
+Repeated measures design
+========================
+```{r, echo = FALSE}
+opts_chunk$set(fig.width = project_settings[["opts_width_facet"]])
+```
+```{r, echo = -4}
+# color by subject; remove jitter
+base_plot$layers[[1]] <- geom_point(aes(color = subject), size = 4)
+subj_base_plot <- base_plot + facet_wrap("subject", ncol = 6)
+subj_base_plot
+```
+
+===
+```{r}
+subj_base_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se),
+  data = preds, stat = "identity", color = "gray", size = 2)
+```
+
+===
+* Observations are non-independent!
+* [Simpson's paradox](http://vudlab.com/simpsons/)
+
+Method 1
+========
+Is the average slope greater than 0?
+```{r, echo = -8}
+extract_lm_coef <- function(y, x, coef) {
+  mod <- lm(y ~ x)
+  coef(mod)[coef]
+}
+
+lm_effects <- sleepstudy %>% 
+  group_by(subject) %>%
+  summarize(
+    intercept = extract_lm_coef(reaction, days_c, 1),
+    slope     = extract_lm_coef(reaction, days_c, 2)
+  )
+
+head(lm_effects, n = 6)
+
+slopes_mod <- lm(slope ~ 1, data = lm_effects)
+tidy(slopes_mod)
+```
+ 
+===
+```{r}
+lmList(reaction ~ days | subject, data = sleepstudy)
+```
+
+Method 2
+========
+Is the slope of an average subject greater than 0?
+```{r, echo = 1}
+lmer_mod <- lmer(reaction ~ days_c + (days_c||subject), data = sleepstudy)
+tidy(lmer_mod, effects = "fixed")
+```
+
+Compare
+=======
+```{r}
+tidy(slopes_mod)
+tidy(lmer_mod, effects = "fixed")
+```
+
+What's in an lmer model object?
+===============================
+```{r}
+summary(lmer_mod)
+```
+
+Fixed effects
+=============
+```{r}
+fixef(lmer_mod)
+tidy(lmer_mod, effects = "fixed")
+```
+
+Random effects
+==============
+```{r, echo = c(1,3)}
+ranef(lmer_mod)
+random_effects <- ranef(lmer_mod)[["subject"]]
+colMeans(random_effects)
+```
+
+coef() = fixef() + ranef()
+==========================
+```{r, echo = 1}
+coef(lmer_mod)
+```
+
+===
+```{r}
+tidy(lmer_mod, effects = "random")
+```
+
+A line for every subject
+========================
+```{r, echo = 1}
+lmer_effects <- tidy(lmer_mod, effects = "random") %>%
+  dcast(level ~ term, value.var = "estimate") %>%
+  select(subject = 1, intercept = 2, slope = 3)
+lmer_effects
+```
+
+gg_magic
+========
+```{r, echo = 1}
+subj_plot <- subj_base_plot + geom_abline(data = lmer_effects,
+  mapping = aes(intercept = intercept, slope = slope, color = subject),
+  size = 2)
+subj_plot
+```
+
+===
+```{r, echo = -4}
+increasing_slope <- lmer_effects %>% arrange(slope) %>% .[["subject"]]
+sleepstudy$subject <- factor(sleepstudy$subject, levels = increasing_slope)
+subj_plot <- subj_plot %+% sleepstudy
+subj_plot
+```
+
+===
+```{r}
+tmp_plot <- subj_plot
+tmp_plot$layers[[1]] <- geom_blank()
+tmp_plot + geom_abline(data = lm_effects, 
+  mapping = aes(intercept = intercept, slope = slope, color = subject), 
+  lty = 2, size = 2)
+```
+
+===
+```{r, echo = FALSE, fig.show = "hold", fig.width = project_settings[["opts_width"]] * 2/3, fig.height = project_settings[["opts_height"]] * 2/3}
+compare <- merge(lm_effects, lmer_effects, by = "subject", 
+                 suffixes = c("_lm", "_lmer"))
+
+ggplot(compare, aes(x = intercept_lmer, y = intercept_lm)) +
+  geom_point(size = 4) +
+  geom_abline(intercept = 0, slope = 1, lty = 2, size = 1) +
+  theme_bw(base_size = gg_base_size) +
+  ggtitle("Intercepts")
+
+ggplot(compare, aes(x = slope_lmer, y = slope_lm)) +
+  geom_point(size = 4) +
+  geom_abline(intercept = 0, slope = 1, lty = 2, size = 1) +
+  theme_bw(base_size = gg_base_size) +
+  ggtitle("Slopes")
+```
+
+predictSE()
+===========
+```{r}
+library(AICcmodavg)
+preds <- cbind(days_map, predictSE(lmer_mod, newdata = days_map, se = TRUE)) %>%
+  rename(reaction = fit, se = se.fit)
+preds
+```
+
+predictSE()
+===========
+```{r}
+move_intercept <- function(center) {
+  new_center <- sleepstudy$days_c - center
+  mod <- lmer(sleepstudy$reaction ~ new_center + (new_center|sleepstudy$subject))
+  tidy(mod, effects = "fixed")[1,3]
+}
+cbind(preds, se2 = sapply(preds$days_c, move_intercept))
+```
+
+Final plot
+==========
+```{r}
+subj_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se), 
+  data = preds, stat = "identity", color = "gray")
 ```
