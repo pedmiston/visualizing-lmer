@@ -1,5 +1,5 @@
-library(MASS)
-library(dplyr)
+suppressPackageStartupMessages(library(MASS))
+suppressPackageStartupMessages(library(dplyr))
 
 #' @param correlations A list of correlations
 #' @param names Names for the resulting matrix
@@ -32,10 +32,16 @@ cor_to_cov <- function(cor_matrix, stdevs) {
 #' @param cor_matrix The desired symmetric correlation matrix for all variables.
 #' @return A data.frame with columns for subject and each parameter
 generate_subject_effects <- function(num_subjects, grand_means, cor_matrix) {
-  cov_matrix <- cor_to_cov(cor_matrix, grand_means$SD)
-  mvrnorm(num_subjects, mu = grand_means$Mean, cov_matrix, empirical = TRUE) %>%
+  cov_matrix <- cor_to_cov(cor_matrix, grand_means$sd)
+  subj_effects <- mvrnorm(num_subjects, mu = grand_means$mean, cov_matrix, empirical = TRUE) %>%
     as.data.frame(.) %>%
-    mutate(Subject = paste0("S", seq(from = 101, to = 101 + num_subjects - 1)))
+    mutate(subject = paste0("S", seq(from = 101, to = 101 + num_subjects - 1)))
+  if ("error" %in% names(subj_effects)) {
+    subj_effects <- subj_effects[,c("subject", "intercept", "slope", "error")]
+  } else {
+    subj_effects <- subj_effects[,c("subject", "intercept", "slope")]
+  }
+  subj_effects
 }
 
 #' Given by-subject effects, generates random data for each subject.
