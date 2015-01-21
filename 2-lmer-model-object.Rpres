@@ -4,9 +4,11 @@ author: Pierce Edmiston
 date: 1/21/2015
 css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
+# --------------------------------------------------------------
 library(broom)
 library(car)
 library(dplyr)
+library(lme4)
 library(ggplot2)
 library(knitr)
 library(reshape2)
@@ -14,37 +16,37 @@ library(yaml)
 
 project_settings <- yaml.load_file("visualizing-lmer.yaml")
 
-opts_chunk$set(fig.align = "center",
-               fig.width = project_settings[["opts_width"]],
-               fig.height = project_settings[["opts_height"]])
+opts_chunk$set(
+  fig.align = "center",
+  fig.width = project_settings[["opts_width"]],
+  fig.height = project_settings[["opts_height"]]
+)
+
 gg_base_size <- project_settings[["gg_base_size"]]
+
+names(sleepstudy) <- tolower(names(sleepstudy))
+sleepstudy <- select(sleepstudy, subject, days, reaction)
 ```
 `github.com/pedmiston/visualizing-lmer`
 
 Part 2
 ======
-* fixed effects vs random effects
-* the `lmer` model object
+* the lmer model object
 * random intercepts and random slopes
 
 More sleep data
 ===============
-```{r, message = FALSE, echo = c(1, 7, 8)}
-library(lme4)
+```{r, echo = -1}
 # ?sleepstudy
-
-names(sleepstudy) <- tolower(names(sleepstudy))
-sleepstudy <- select(sleepstudy, subject, days, reaction)
-
+library(lme4)
 head(sleepstudy, n = 12)
 ( N <- length(unique(sleepstudy$subject)) )
 ```
 
-Centering
-=========
-```{r, echo = c(1, 3, 4, 7)}
+Centering*
+==========
+```{r, echo = c(-4, -7)}
 unique(sleepstudy$days)
-
 # use dplyr::data_frame to build incrementally
 days_map <- dplyr::data_frame(  
     days = unique(sleepstudy$days),
@@ -53,11 +55,12 @@ days_map <- dplyr::data_frame(
 days_map
 
 sleepstudy <- left_join(sleepstudy, days_map)
-sleepstudy <- select(sleepstudy, subject, days, days_c, reaction)
+sleepstudy <- sleepstudy %>% 
+  select(subject, days, days_c, reaction)
 ```
 
-Ignoring subject
-================
+Base plot
+=========
 ```{r, echo = 3}
 theme_colors <- list(
   green = "#66c2a5",  # colorbrewer.org
@@ -85,43 +88,61 @@ base_plot <- base_plot +
 base_plot
 ```
 
-Adding predictions
-==================
+Ignoring subject (1)
+====================
 ```{r}
 simple_lm <- lm(reaction ~ days_c, data = sleepstudy)
-preds <- cbind(days_map, predict(simple_lm, newdata = days_map, se = TRUE)) %>%
+y_estimates <- predict(simple_lm, days_map, se.fit = TRUE)
+estimates <- cbind(days_map, y_estimates) %>%
   select(days, days_c, reaction = fit, se = se.fit)
+```
 
-base_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se),
-  data = preds, stat = "identity", color = theme_colors[["blue"]], size = 2)
+Ignoring subject (2)
+====================
+```{r}
+base_plot + geom_smooth(data = estimates,
+  mapping = aes(ymin = reaction-se, ymax = reaction+se),
+  stat = "identity", color = theme_colors[["blue"]], size = 2)
 ```
 
 Repeated measures design
 ========================
 ```{r, echo = FALSE}
-opts_chunk$set(fig.width = project_settings[["opts_width_facet"]])
+opts_chunk$set(
+  fig.width = project_settings[["opts_width_facet"]]
+)
 ```
-```{r, echo = -4}
+```{r, echo = 1:2}
 # color by subject; remove jitter
-base_plot$layers[[1]] <- geom_point(aes(color = subject), size = 4)
+base_plot$layers[[1]] <- geom_point(aes(color = subject), 
+                                    size = 4)
+base_plot
+```
+
+facet_wrap()
+============
+```{r, echo = 1}
 subj_base_plot <- base_plot + facet_wrap("subject", ncol = 6)
 subj_base_plot
 ```
 
-===
+Layer on the estimates
+======================
 ```{r}
-subj_base_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se),
-  data = preds, stat = "identity", color = "gray", size = 2)
+subj_base_plot + geom_smooth(data = estimates,
+  mapping = aes(ymin = reaction-se, ymax = reaction+se),
+  stat = "identity", color = "gray", size = 2)
 ```
 
-===
-* Observations are non-independent!
-* [Simpson's paradox](http://vudlab.com/simpsons/)
+Problems
+========
+* many formal reasons why this is incorrect
+* informal: not modeling the average subject
 
 Method 1
 ========
-Is the average slope greater than 0?
-```{r, echo = -8}
+Fit an lm for every subject
+```{r}
 extract_lm_coef <- function(y, x, coef) {
   mod <- lm(y ~ x)
   coef(mod)[coef]
@@ -135,21 +156,27 @@ lm_effects <- sleepstudy %>%
   )
 
 head(lm_effects, n = 6)
+```
 
+Is the average slope greater than 0?
+====================================
+```{r, echo = 1}
 slopes_mod <- lm(slope ~ 1, data = lm_effects)
 tidy(slopes_mod)
 ```
- 
-===
+
+The easy button
+===============
 ```{r}
 lmList(reaction ~ days | subject, data = sleepstudy)
 ```
 
 Method 2
 ========
-Is the slope of an average subject greater than 0?
+Think about it hierarchically
 ```{r, echo = 1}
-lmer_mod <- lmer(reaction ~ days_c + (days_c||subject), data = sleepstudy)
+lmer_mod <- lmer(reaction ~ days_c + (days_c||subject),
+                 data = sleepstudy)
 tidy(lmer_mod, effects = "fixed")
 ```
 
@@ -187,7 +214,8 @@ coef() = fixef() + ranef()
 coef(lmer_mod)
 ```
 
-===
+Tidy them up
+============
 ```{r}
 tidy(lmer_mod, effects = "random")
 ```
@@ -204,41 +232,55 @@ lmer_effects
 gg_magic
 ========
 ```{r, echo = 1}
-subj_plot <- subj_base_plot + geom_abline(data = lmer_effects,
-  mapping = aes(intercept = intercept, slope = slope, color = subject),
-  size = 2)
+subj_plot <- subj_base_plot + 
+  geom_abline(data = lmer_effects, size = 2,
+    mapping = aes(intercept = intercept, 
+                  slope = slope, 
+                  color = subject))
 subj_plot
 ```
 
-===
+Sort by slope
+=============
 ```{r, echo = -4}
-increasing_slope <- lmer_effects %>% arrange(slope) %>% .[["subject"]]
-sleepstudy$subject <- factor(sleepstudy$subject, levels = increasing_slope)
+increasing_slope <- lmer_effects %>% 
+  arrange(slope) %>% .[["subject"]]
+sleepstudy$subject <- factor(sleepstudy$subject, 
+                             levels = increasing_slope)
+```
+
+gg_update
+=========
+```{r, echo = 1}
 subj_plot <- subj_plot %+% sleepstudy
 subj_plot
 ```
 
-===
-```{r}
+Comparing lmer to lmList (1)
+============================
+```{r, echo = FALSE}
 tmp_plot <- subj_plot
 tmp_plot$layers[[1]] <- geom_blank()
 tmp_plot + geom_abline(data = lm_effects, 
-  mapping = aes(intercept = intercept, slope = slope, color = subject), 
-  lty = 2, size = 2)
+  lty = 2, size = 2,
+  mapping = aes(intercept = intercept, 
+                slope = slope, 
+                color = subject))
 ```
 
-===
+Shrinkage
+=========
 ```{r, echo = FALSE, fig.show = "hold", fig.width = project_settings[["opts_width"]] * 2/3, fig.height = project_settings[["opts_height"]] * 2/3}
 compare <- merge(lm_effects, lmer_effects, by = "subject", 
-                 suffixes = c("_lm", "_lmer"))
+                 suffixes = c("_lmList", "_lmer"))
 
-ggplot(compare, aes(x = intercept_lmer, y = intercept_lm)) +
+ggplot(compare, aes(x = intercept_lmer, y = intercept_lmList)) +
   geom_point(size = 4) +
   geom_abline(intercept = 0, slope = 1, lty = 2, size = 1) +
   theme_bw(base_size = gg_base_size) +
   ggtitle("Intercepts")
 
-ggplot(compare, aes(x = slope_lmer, y = slope_lm)) +
+ggplot(compare, aes(x = slope_lmer, y = slope_lmList)) +
   geom_point(size = 4) +
   geom_abline(intercept = 0, slope = 1, lty = 2, size = 1) +
   theme_bw(base_size = gg_base_size) +
@@ -247,27 +289,17 @@ ggplot(compare, aes(x = slope_lmer, y = slope_lm)) +
 
 predictSE()
 ===========
-```{r}
+```{r, echo = -3}
 library(AICcmodavg)
-preds <- cbind(days_map, predictSE(lmer_mod, newdata = days_map, se = TRUE)) %>%
-  rename(reaction = fit, se = se.fit)
-preds
-```
-
-predictSE()
-===========
-```{r}
-move_intercept <- function(center) {
-  new_center <- sleepstudy$days_c - center
-  mod <- lmer(sleepstudy$reaction ~ new_center + (new_center|sleepstudy$subject))
-  tidy(mod, effects = "fixed")[1,3]
-}
-cbind(preds, se2 = sapply(preds$days_c, move_intercept))
+estimates <- predictSE(lmer_mod, days_map, se.fit = TRUE) %>%
+  cbind(days_map, .) %>% rename(reaction = fit, se = se.fit)
+estimates
 ```
 
 Final plot
 ==========
 ```{r}
-subj_plot + geom_smooth(aes(ymin = reaction-se, ymax = reaction+se), 
-  data = preds, stat = "identity", color = "gray")
+subj_plot + geom_smooth(data = estimates,
+  mapping = aes(ymin = reaction-se, ymax = reaction+se), 
+  stat = "identity", color = "gray")
 ```
