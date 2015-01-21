@@ -4,6 +4,7 @@ author: Pierce Edmiston
 date: 1/21/2015
 css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
+# --------------------------------------------------------------
 library(broom)
 library(car)
 library(dplyr)
@@ -14,9 +15,12 @@ library(yaml)
 
 project_settings <- yaml.load_file("visualizing-lmer.yaml")
 
-opts_chunk$set(fig.align = "center",
-               fig.width = project_settings[["opts_width"]],
-               fig.height = project_settings[["opts_height"]])
+opts_chunk$set(
+  fig.align = "center",
+  fig.width = project_settings[["opts_width"]],
+  fig.height = project_settings[["opts_height"]]
+)
+
 gg_base_size <- project_settings[["gg_base_size"]]
 ```
 `github.com/pedmiston/visualizing-lmer`
@@ -26,26 +30,28 @@ Part 1
 * ggplot's grammar of graphics
 * visualizing simple linear regression
 
-Student's Sleep Data
+Student's sleep data
 ====================
-```{r, echo = 3:4}
+```{r, echo = 4}
 # ?sleep
-sleep$group <- recode(sleep$group, "'1' = 'drug_x'; '2' = 'drug_y'", 
-                      as.factor = FALSE)
-(N = nrow(sleep))
-head(sleep, n = 12)
+sleep <- select(sleep, -ID)  # ignore ID for now
+sleep$group <- recode(sleep$group, 
+  "'1' = 'drug_x'; '2' = 'drug_y'", 
+  as.factor = FALSE)
+( N = nrow(sleep) )
+sleep
 ```
 
 Dealing with factors
 ====================
 ```{r}
-sleep$group_c <- recode(sleep$group, "'drug_x' = -0.5; 'drug_y' = 0.5", 
-                        as.numeric = TRUE)
+sleep$group_c <- recode(sleep$group, as.numeric = TRUE,
+  recodes = "'drug_x' = -0.5; 'drug_y' = 0.5")
 table( sleep[,c("group", "group_c")] )
 ```
 
-Start plot with observations
-============================
+Build plot on observations
+==========================
 ```{r, echo = 1}
 base_plot <- ggplot(sleep, aes(x = group_c, y = extra)) +
   geom_point(aes(color = factor(group_c)), size = 5,
@@ -77,22 +83,27 @@ base_plot
 Use stat_summary() to add descriptives
 ======================================
 ```{r, echo = 1}
-base_plot + stat_summary(fun.data = mean_se, geom = "pointrange", 
-    shape = 18, size = 2, color = theme_colors[["orange"]])
+base_plot + stat_summary(fun.data = mean_se, 
+    geom = "pointrange", shape = 18, size = 2, 
+    color = theme_colors[["orange"]])
 ```
 
-Or add a layer with new data
-============================
+Easily add new data
+===================
 ```{r, echo = 1}
 custom_error <- sleep %>% group_by(group_c) %>% 
   summarize(
-    se = sqrt( var(extra)/n() ),
+    se = sqrt( var(extra)/n() ), 
     extra = mean(extra)  # note the order
   )
-base_plot + stat_summary(fun.data = mean_se, geom = "pointrange", 
-    shape = 18, size = 2, color = theme_colors[["orange"]]) +
-  geom_linerange(aes(x = group_c+0.1, ymin = extra-se, ymax = extra+se), 
-    data = custom_error, size = 2)
+base_plot + 
+  stat_summary(fun.data = mean_se, 
+    geom = "pointrange", shape = 18, size = 2, 
+    color = theme_colors[["orange"]]) +
+  geom_linerange(data = custom_error, size = 2,
+    mapping = aes(x = group_c + 0.1,  # bump right
+                  ymin = extra - se, 
+                  ymax = extra + se))
 ```
 
 Fitting a model
@@ -110,8 +121,8 @@ sleep_test <- t.test(extra ~ group_c, data = sleep)
 tidy(sleep_test) %>% select(estimate, statistic, p.value)
 ```
 
-Drawing with geom_abline()
-==========================
+geom_abline() takes formulas
+============================
 ```{r, echo = 1}
 abline_plot <- base_plot + 
   geom_abline(intercept = 1.54, slope = 1.58,
@@ -126,67 +137,73 @@ abline_plot + stat_summary(fun.y = mean, geom = "point",
   shape = 16, size = 8, color = theme_colors[["orange"]])
 ```
 
-Draw a line segment with predict()
-==================================
+Points on a line segment with predict()
+=======================================
 ```{r}
 x_values <- data.frame(group_c = seq(-0.5, 0.5, by = 0.1))
 y_values <- predict(sleep_mod, newdata = x_values)
 estimates <- data.frame(x_values, extra = y_values)
 ```
 
-The values we care about
-```{r}
+Interpolation and extrapolation
+===============================
+The values in our data
+```{r, echo = FALSE}
 filter(estimates, group_c %in% c(-0.5, 0.5))
 ```
 
-But remember what `predict()` is doing
+But remember what predict() is doing
 ```{r}
 estimates
 ```
 
-Draw the line with predict()
-============================
+Skinning cats
+=============
 ```{r}
 abline_plot + geom_point(data = estimates, 
   shape = 16, size = 8, color = theme_colors[["orange"]])
 ```
 
-===
-`predict(..., se.fit = TRUE)`
+se.fit = TRUE
+=============
 ```{r, echo = 1}
-estimates <- predict(sleep_mod, newdata = x_values, se.fit = TRUE) %>%
-  cbind(x_values, .) %>% select(group_c, extra = fit, se = se.fit)
+estimates <- predict(sleep_mod, x_values, se.fit = TRUE) %>%
+  cbind(x_values, .) %>% 
+  select(group_c, extra = fit, se = se.fit)
 estimates
 tidy(sleep_mod)
 ```
 
-===
-`predict(..., se.fit = TRUE)`
-```{r}
+Re-center, re-fit
+=================
+```{r, echo = 1:2}
 move_intercept <- function(center) {
-  new_center <- sleep$group_c - center
-  tidy( lm(sleep$extra ~ new_center) )[[1,3]] # (Intercept) error
+  re_center <- sleep$group_c - center
+  re_fit <- lm(sleep$extra ~ re_center)
+  tidy(re_fit)[[1,3]] # (Intercept) error
 }
-cbind(estimates, se2 = sapply(estimates$group_c, move_intercept))
+manual_se <- sapply(estimates$group_c, move_intercept)
+cbind(estimates, manual_se = manual_se)
 ```
 
-Summary
-=======
-```{r, echo = -3}
+Grammar of linear regression
+============================
+```{r, echo = -4}
+sleep_mod <- lm(extra ~ group_c, sleep)
 groups <- data.frame(group_c = unique(sleep$group_c))
 estimates <- predict(sleep_mod, groups, se.fit = TRUE) %>%
-  cbind(groups, .) %>% select(group_c, extra = fit, se = se.fit)
+  cbind(groups, .) %>% select(group_c, extra=fit, se=se.fit)
 estimates
 ```
 
 Final plot
 ==========
-```{r, echo = 1}
+```{r, echo = FALSE}
 sleep_plot <- base_plot + 
   geom_bar(aes(fill = as.factor(group_c)), data = estimates, 
     stat = "identity", alpha = 0.4, color = "black") +
   geom_linerange(aes(ymin = extra - se, ymax = extra + se),
-    data = estimates, size = 1.5)
+    data = estimates, size = 1.0)
 sleep_plot <- sleep_plot +
   scale_fill_manual(
     values = c(theme_colors[["green"]], theme_colors[["blue"]])
