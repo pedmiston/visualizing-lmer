@@ -3,6 +3,12 @@ PackratVersion: 0.4.2.1
 RVersion: 3.1.2
 Repos: CRAN=http://cran.rstudio.com
 
+Package: AICcmodavg
+Source: CRAN
+Version: 2.0-3
+Hash: 780e142d07dded3bbbd44405ea02862f
+Requires: VGAM, unmarked, xtable
+
 Package: BH
 Source: CRAN
 Version: 1.55.0-3
@@ -28,10 +34,21 @@ Source: CRAN
 Version: 0.11.3
 Hash: d9cc0a13885961b2d004cf73b0fb68dd
 
+Package: RcppArmadillo
+Source: CRAN
+Version: 0.4.600.0
+Requires: Rcpp
+
 Package: RcppEigen
 Source: CRAN
 Version: 0.3.2.3.0
+Hash: bfaa674390ef40671222cef5b9552f83
 Requires: Rcpp
+
+Package: VGAM
+Source: CRAN
+Version: 0.9-6
+Hash: 3b03ab734760eed10f25dc8a8b06b9b4
 
 Package: assertthat
 Source: CRAN
@@ -116,7 +133,7 @@ Hash: 7f88a453d0b52e36ea46d9d33c6dcf90
 Package: lme4
 Source: CRAN
 Version: 1.1-7
-Hash: 4c54c3aedda990d722fee46d2f257cf1
+Hash: 87433f4b61ea74a9d43ea1bb36982029
 Requires: Rcpp, RcppEigen, minqa, nloptr
 
 Package: magrittr
@@ -173,6 +190,12 @@ Source: CRAN
 Version: 1.4.8.11
 Hash: f2f25231695ce104751321f7061939bf
 
+Package: reshape
+Source: CRAN
+Version: 0.8.5
+Hash: 3a8bcdf002df52627d35dfab189711f4
+Requires: plyr
+
 Package: reshape2
 Source: CRAN
 Version: 1.4.1
@@ -206,6 +229,17 @@ Source: CRAN
 Version: 0.2.0
 Hash: 3b379415e9e88d4f559b380819893304
 Requires: dplyr, lazyeval, reshape2, stringi
+
+Package: unmarked
+Source: CRAN
+Version: 0.10-4
+Hash: 3fa2323a68e9abefd644788f6448d514
+Requires: Rcpp, RcppArmadillo, plyr, reshape
+
+Package: xtable
+Source: CRAN
+Version: 1.7-4
+Hash: 7b30b5ca6c7ae80c4f916502e3ad0237
 
 Package: yaml
 Source: CRAN

@@ -4,8 +4,9 @@ author: Pierce Edmiston
 date: 1/21/2015
 css: visualizing-lmer.css
 ```{r setup, echo = FALSE, warning = FALSE}
+# --------------------------------------------------------------
 library(broom)
-library(MASS)  # load before dplyr
+library(MASS)  # namespace overlap for select; load before dplyr
 library(dplyr)
 library(ggplot2)
 library(knitr)
@@ -15,9 +16,12 @@ library(yaml)
 
 project_settings <- yaml.load_file("visualizing-lmer.yaml")
 
-opts_chunk$set(fig.align = "center",
-               fig.width = project_settings[["opts_width"]],
-               fig.height = project_settings[["opts_height"]])
+opts_chunk$set(
+  fig.align = "center",
+  fig.width = project_settings[["opts_width_facet"]],
+  fig.height = project_settings[["opts_height_facet"]]
+)
+
 gg_base_size <- project_settings[["gg_base_size"]]
 
 names(sleepstudy) <- tolower(names(sleepstudy))
@@ -26,7 +30,8 @@ days_map <- dplyr::data_frame(
     days_c = days - median(days)
   )
 sleepstudy <- left_join(sleepstudy, days_map)
-sleepstudy <- select(sleepstudy, subject, days, days_c, reaction)
+sleepstudy <- sleepstudy %>% 
+  select(subject, days, days_c, reaction)
 ```
 `github.com/pedmiston/visualizing-lmer`
 
@@ -42,10 +47,12 @@ Mixed effects model formulas
 What does the correlation parameter do?
 =======================================
 ```{r}
-uncorrelated <- lmer(reaction ~ days_c + (days_c || subject), sleepstudy)
+uncorrelated <- lmer(reaction ~ days_c + (days_c || subject),
+                     data = sleepstudy)
 uncorrelated@call
 
-correlated   <- lmer(reaction ~ days_c + (days_c |  subject), sleepstudy)
+correlated   <- lmer(reaction ~ days_c + (days_c |  subject),
+                     data = sleepstudy)
 correlated@call
 ```
 
@@ -60,7 +67,8 @@ VarCorr(correlated)
 What's the "actual" correlation?
 ================================
 ```{r}
-lm_list <- lmList(reaction ~ days_c | subject, data = sleepstudy)
+lm_list <- lmList(reaction ~ days_c | subject, 
+                  data = sleepstudy)
 lm_effects <- coef(lm_list)
 cor(lm_effects[1], lm_effects[2])
 ```
@@ -89,8 +97,10 @@ subj_effects
 Reverse engineering
 ===================
 ```{r}
-subj_data <- subj_effects %>%
-  left_join(expand.grid(subject = subj_effects$subject, days = 0:9), .) %>%
+subj_data <- expand.grid(
+    subject = subj_effects$subject, days = 0:9
+  ) %>% 
+  left_join(subj_effects) %>%
   left_join(days_map) %>%
   arrange(subject, days) %>%
   mutate(residual = residuals(uncorrelated)) %>%
@@ -108,10 +118,14 @@ head(subj_data, n = 12)
 
 Sanity check
 ============
-```{r}
+```{r, echo = FALSE}
 cbind(
-  subj_data %>% filter(subject == 308) %>% select(subject, days, reaction), 
-  sleepstudy %>% filter(subject == 308) %>% select(subject, days, reaction)
+  subj_data %>% 
+    filter(subject == 308) %>% 
+    select(subject, days, reaction), 
+  sleepstudy %>% 
+    filter(subject == 308) %>% 
+    select(subject, days, reaction)
 )
 ```
 
@@ -123,13 +137,23 @@ source("R/simulate.R")
 num_subjects <- 24
 grand_means <- data.frame(
   term = c("intercept", "slope"),
-  mean = c(300, 10), 
-  sd   = c(38, 8)
+  mean = c(300, 4), 
+  sd   = c(38, 10)
 )
+grand_means
+```
+
+Simulated effects
+=================
+```{r}
 correlations <- c("intercept_slope" = 0.9)
 cor_matrix <- to_cor_matrix(correlations, grand_means$term)
 cor_matrix
+```
 
+Simulated effects
+=================
+```{r}
 correlated_effects <- generate_subject_effects(
   num_subjects, grand_means, cor_matrix, seed = 12
 )
@@ -163,82 +187,161 @@ repeat {
 cor(intercepts, uncorrelated_slopes)
 ```
 
-===
+Permutations of the same parameters
+===================================
 ```{r}
 subj_effects <- correlated_effects %>%
   rename(corr_slope = slope) %>%
   mutate(uncorr_slope = uncorrelated_slopes)
 head(subj_effects)
 
-cbind(
-  sort(subj_effects$corr_slope),
-  sort(subj_effects$uncorr_slope)
-)
 ```
 
-===
+Expand and add residual error
+=============================
 ```{r}
-subj_data <- subj_effects %>%
-  left_join(expand.grid(subject = subj_effects$subject, days = 0:9), .) %>%
+subj_data <- expand.grid(
+    subject = subj_effects$subject, days = 0:9
+  ) %>%
+  left_join(subj_effects) %>%
   left_join(days_map) %>%
   arrange(subject, days) %>%
-  mutate(residual = rnorm(n = n(), mean = 0, sd = 10)) %>%
-  select(subject, days, days_c, intercept, corr_slope, uncorr_slope, residual)
+  mutate(residual = rnorm(n = n(), mean = 0, sd = 25)) %>%
+  select(subject, days, days_c, 
+         intercept, corr_slope, uncorr_slope, residual)
 head(subj_data, n = 12)
 ```
 
-===
+Simulate the experiment
+=======================
 ```{r}
 subj_data <- subj_data %>% mutate(
-    corr_reaction = intercept + (corr_slope * days_c) + residual,
-    uncorr_reaction = intercept + (uncorr_slope * days_c) + residual
+    corr_reaction=intercept + (corr_slope*days_c) + residual,
+    uncorr_reaction=intercept + (uncorr_slope*days_c) + residual
   )
 ```
 
-===
+Plot correlated
+===============
+```{r, echo = FALSE}
+plot_simulation <- function(frame, y_col) {
+  lm_formula <- as.formula(paste0(y_col, " ~ days_c | subject"))
+  lm_effects <- lmList(lm_formula, frame)
+  increasing_slope <- coef(lm_effects) %>% as.data.frame(.)
+  increasing_slope$subject <- row.names(increasing_slope)
+  increasing_slope <- increasing_slope %>% 
+    arrange(days_c) %>% .[["subject"]]
+  frame$subject <- factor(frame$subject, 
+                          levels = increasing_slope)
+  
+  ggplot(frame, aes_string(y = y_col, x = "days_c")) +
+    geom_point(aes(color = subject)) +
+    facet_wrap("subject", ncol = 6) +
+    scale_x_continuous(
+      "Sleep Deprivation (days)", 
+      breaks = days_map$days_c,
+      labels = days_map$days
+    ) + 
+    scale_y_continuous(
+      "Average Reaction Time (ms)",
+      breaks = seq(150, 500, by = 50)
+    ) +
+    theme_bw(base_size = gg_base_size) +
+    theme(legend.position = "none")
+}
+```
+```{r}
+plot_simulation(subj_data, "corr_reaction")
+```
+
+Plot uncorrelated
+=================
+```{r}
+plot_simulation(subj_data, "uncorr_reaction")
+```
+
+Same numbers, different order
+=============================
 ```{r}
 tidy( lm(corr_slope ~ 1, subj_effects) )
 tidy( lm(uncorr_slope ~ 1, subj_effects) )
 ```
 
-===
+As expected, almost identical
+=============================
 ```{r}
-corr_list <- lmList(corr_reaction ~ days_c | subject, subj_data)
-uncorr_list <- lmList(uncorr_reaction ~ days_c | subject, subj_data)
+corr_list   <- lmList(  corr_reaction ~ days_c | subject, 
+                      subj_data)
+uncorr_list <- lmList(uncorr_reaction ~ days_c | subject,
+                      subj_data)
 
 tidy( lm(days_c ~ 1, coef(corr_list)) )
 tidy( lm(days_c ~ 1, coef(uncorr_list)) )
 ```
 
-===
+What about lmer?
+================
 ```{r}
-lmer_corr <- lmer(corr_reaction ~ days_c + (days_c|subject), data = subj_data)
-tidy(lmer_corr, effects = "fixed")
+lmer_corr   <-lmer(  corr_reaction ~ days_c + (days_c|subject),
+                   data = subj_data)
 
-lmer_uncorr <- lmer(uncorr_reaction ~ days_c + (days_c||subject), data = subj_data)
+lmer_uncorr <-lmer(uncorr_reaction ~ days_c + (days_c||subject), 
+                   data = subj_data)
+
+tidy(lmer_corr,   effects = "fixed")
 tidy(lmer_uncorr, effects = "fixed")
+```
+
+Same data, with/without
+=======================
+```{r}
+without_corr <- lmer(corr_reaction ~ days_c + (days_c||subject),
+                     data = subj_data)
+tidy(lmer_corr, effects = "fixed")
+tidy(without_corr, effects = "fixed")
+```
+
+VarCorr()
+=========
+```{r}
+VarCorr(lmer_corr)
+
+VarCorr( lmer(uncorr_reaction ~ days_c + (days_c|subject),
+              data = subj_data) )
 ```
 
 Simulation 2
 ============
-* what if our effect of interest is correlated with error?
+What if someone who shows a strong effect also has a lot of error?
 
-===
+Error for each subject
+======================
 ```{r}
 source("R/simulate.R")
 
 num_subjects <- 24
 grand_means <- data.frame(
   term = c("intercept", "slope", "error"),
-  mean = c(300, 10, 20), 
-  sd   = c(38, 8, 10)
+  mean = c(300, 5, 35), 
+  sd   = c(38, 10, 20)
 )
-correlations <- c("intercept_slope" = 0.0, "intercept_error" = 0.0, "slope_error" = 0.8)
+grand_means
+```
+
+Make the subject effects
+========================
+```{r, echo = -6}
+correlations <- c("intercept_slope" = 0.0, 
+                  "intercept_error" = 0.0, 
+                  "slope_error" = 0.8)
 cor_matrix <- to_cor_matrix(correlations, grand_means$term)
 
-correlated_effects <- generate_subject_effects(num_subjects, grand_means, cor_matrix)
+correlated_effects <- generate_subject_effects(
+  num_subjects, grand_means, cor_matrix, seed = 24
+)
 head(correlated_effects)
-round( cor(correlated_effects[,c("intercept", "slope", "error")]), 2)
+cor(correlated_effects[,c("intercept", "slope", "error")]) %>%
+  round(., 2) 
 ```
 
 Brute force again
@@ -255,7 +358,8 @@ repeat {
   current_intercepts <- cor(intercepts, uncorrelated_error)
   current_slopes     <- cor(slopes, uncorrelated_error)
   
-  if ( abs(current_intercepts) <= 0.1 & abs(current_slopes) <= 0.1) {
+  if ( abs(current_intercepts) <= 0.1 & 
+       abs(current_slopes)     <= 0.1 ) {
     break
   } else if (i > 10000) {
     warning("Maximum iteration limit reached")
@@ -265,57 +369,104 @@ repeat {
   uncorrelated_error <- sample(uncorrelated_error)
 }
 
-cor(intercepts, uncorrelated_error)
-cor(slopes, uncorrelated_error)
+cor(cbind(intercepts, slopes, uncorrelated_error)) %>%
+  round(., 2)
 ```
 
-===
+Make the data
+=============
+Use the error term as the sd of the residual distribution.
 ```{r}
 subj_effects <- correlated_effects %>%
   rename(corr_error = error) %>%
   mutate(uncorr_error = uncorrelated_error)
 
-subj_data <- subj_effects %>%
-  left_join(expand.grid(subject = subj_effects$subject, days = 0:9), .) %>%
+subj_data <- expand.grid(
+    subject = subj_effects$subject, days = 0:9
+  ) %>%
+  left_join(subj_effects) %>%
   left_join(days_map) %>%
   arrange(subject, days) %>%
   group_by(subject) %>%
   mutate(
     corr_residual = rnorm(n = n(), mean = 0, sd = corr_error),
-    uncorr_residual = rnorm(n = n(), mean = 0, sd = uncorr_error)
+    uncorr_residual=rnorm(n = n(), mean = 0, sd = uncorr_error)
   ) %>% ungroup() %>%
-  select(subject, days, days_c, intercept, slope, corr_residual, uncorr_residual)
+  select(subject, days, days_c, 
+         intercept, slope, corr_residual, uncorr_residual)
 head(subj_data, n = 12)
 ```
 
-===
+Recreate the experiment
+=======================
 ```{r}
 subj_data <- subj_data %>% mutate(
-    corr_reaction = intercept + (slope * days_c) + corr_residual,
-    uncorr_reaction = intercept + (slope * days_c) + uncorr_residual
+    corr_reaction =intercept + (slope*days_c) + corr_residual,
+    uncorr_reaction=intercept + (slope*days_c) +uncorr_residual
   )
 ```
 
-===
+Plot correlated
+===============
 ```{r}
-corr_list <- lmList(corr_reaction ~ days_c | subject, subj_data)
-uncorr_list <- lmList(uncorr_reaction ~ days_c | subject, subj_data)
+plot_simulation(subj_data, "corr_reaction")
+```
+
+Plot uncorrelated
+=================
+```{r}
+plot_simulation(subj_data, "uncorr_reaction")
+```
+
+lmList should be the same
+=========================
+Population mean is 5.
+```{r}
+corr_list   <- lmList(  corr_reaction ~ days_c | subject, 
+                      subj_data)
+uncorr_list <- lmList(uncorr_reaction ~ days_c | subject,
+                      subj_data)
 
 tidy( lm(days_c ~ 1, coef(corr_list)) )
 tidy( lm(days_c ~ 1, coef(uncorr_list)) )
 ```
 
-===
+Does lmer do better?
+====================
 ```{r}
-lmer_corr <- lmer(corr_reaction ~ days_c + (days_c|subject), data = subj_data)
-tidy(lmer_corr, effects = "fixed")
+lmer_corr   <- lmer(  corr_reaction ~ days_c +(days_c|subject),
+                    data = subj_data)
 
-lmer_uncorr <- lmer(uncorr_reaction ~ days_c + (days_c||subject), data = subj_data)
+lmer_uncorr <- lmer(uncorr_reaction ~ days_c+(days_c||subject),
+                    data = subj_data)
+
+tidy(lmer_corr, effects = "fixed")
 tidy(lmer_uncorr, effects = "fixed")
 ```
 
-===
+Same data, with/without
+=======================
+```{r}
+without_corr <- lmer(corr_reaction ~ days_c + (days_c||subject),
+                     data = subj_data)
+tidy(lmer_corr, effects = "fixed")
+tidy(without_corr, effects = "fixed")
+```
+
+Poking around
+=============
 ```{r}
 VarCorr(lmer_corr)
-VarCorr(lmer_uncorr)
+VarCorr( lmer(uncorr_reaction ~ days_c + (days_c|subject), 
+              data = subj_data) )
 ```
+
+Conclusions
+===========
+* No evidence that correlation parameters help obtain unbiased predictors
+* Maybe they help when clusters are unbalanced? Other ideas?
+
+Other things to check out in lmer
+=================================
+* Fully nested designs: `lmer(y ~ x + (x||g1/g2))`
+* Orthogonal clusters: `lmer(y ~ x + (x|subjects) + (x|items))`
