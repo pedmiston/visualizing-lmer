@@ -31,7 +31,9 @@ cor_to_cov <- function(cor_matrix, stdevs) {
 #'          of the variables.
 #' @param cor_matrix The desired symmetric correlation matrix for all variables.
 #' @return A data.frame with columns for subject and each parameter
-generate_subject_effects <- function(num_subjects, grand_means, cor_matrix) {
+generate_subject_effects <- function(num_subjects, grand_means, cor_matrix, 
+                                     seed = as.numeric(format(Sys.time(), "%M%S"))) {
+  set.seed(seed)
   cov_matrix <- cor_to_cov(cor_matrix, grand_means$sd)
   subj_effects <- mvrnorm(num_subjects, mu = grand_means$mean, cov_matrix, empirical = TRUE) %>%
     as.data.frame(.) %>%
@@ -48,14 +50,32 @@ generate_subject_effects <- function(num_subjects, grand_means, cor_matrix) {
 #'
 #' @param parameters A list with slots for Subject, Intercept, Slope, and Error
 #' @return A data.frame in the form of the sleepstudy package in lme4
-generate_subject_data <- function(subj_effects) {
+generate_subject_data <- function(subj_effects, residual_sd = NULL,
+                                  seed = as.numeric(format(Sys.time(), "%M%S"))) {
+  set.seed(seed)
+  if (!is.null(residual_sd)) {
+    subj_effects$residual_sd <- residual_sd
+  }
   subj_effects %>% rowwise() %>%
     do({
-      data.frame(Subject = .[["Subject"]], Days = 0:9) %>%
+      base_reaction = rnorm(n = length(0:9), mean = .[["intercept"]], sd = .[["residual_sd"]])
+      base_slope = rep(.[["slope"]], times = length(0:9))
+      data.frame(subject = .[["subject"]], days = 0:9) %>%
         mutate(
-          DaysCentered = Days - mean(Days),
-          Reaction = rnorm(n(), mean = .[["Intercept"]], sd = .[["Error"]]),
-          Reaction = Reaction + .[["Slope"]] * DaysCentered
+          days_c = days - median(days),
+          reaction = base_reaction,
+          reaction = reaction + days_c * base_slope
         )
     }) %>% ungroup()
+}
+
+shuffle_until <- function(frame, col, break_func, max_iter = 1000, 
+                          seed = as.numeric(format(Sys.time(), "%M%S"))) {
+  set.seed(seed)
+  i <- 1
+  while (break_func(frame) == FALSE && i < max_iter) {
+    frame[col] <- sample(frame[[col]])
+    i <- i + 1
+  }
+  frame
 }

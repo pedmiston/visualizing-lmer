@@ -1,6 +1,9 @@
 SOURCES := $(shell find . -name '*.Rpres')
 SOURCES := $(patsubst %.Rpres,%,$(SOURCES))
 
+test:
+	R -e "library(testthat); test_file('R/test-simulate.R')"
+
 knit:
 	for src in $(SOURCES) ; do \
 		echo knitting $$src.Rpres ; \
